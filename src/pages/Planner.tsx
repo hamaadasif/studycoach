@@ -231,10 +231,7 @@ export default function Planner() {
         days[dayIndex].entries.push(entry);
       } else {
         days[dayIndex].entries[existingIdx].hours += entry.hours;
-        days[dayIndex].entries[existingIdx].score = Math.max(
-          days[dayIndex].entries[existingIdx].score,
-          entry.score
-        );
+        days[dayIndex].entries[existingIdx].score = Math.max(days[dayIndex].entries[existingIdx].score, entry.score);
       }
 
       days[dayIndex].totalHours += entry.hours;
@@ -245,20 +242,23 @@ export default function Planner() {
     const overdueCap = capOverdue ? Math.floor(budget * 0.6) : Infinity;
     let overdueAllocated = 0;
 
-    for (const item of scored) {
-      if (budget <= 0) break;
+    const allocatedByTask = new Map<string, number>();
 
-      let remaining = Math.min(item.hoursNeeded, budget);
+    let dayCursor = 0;
 
-      if (item.overdue && overdueAllocated >= overdueCap) continue;
+    function canAllocateOverdue(isOverdue: boolean) {
+      return !isOverdue || overdueAllocated < overdueCap;
+    }
 
-      let di = 0;
+    function allocateHours(item: { t: Task; s: number; overdue: boolean }, hours: number) {
+      let remaining = hours;
+
       while (remaining > 0 && budget > 0 && days.length > 0) {
-        if (item.overdue && overdueAllocated >= overdueCap) break;
+        if (!canAllocateOverdue(item.overdue)) break;
 
         const chunk = Math.min(1, remaining);
 
-        addOrMergeEntry(di, {
+        addOrMergeEntry(dayCursor, {
           taskId: item.t.id,
           courseId: item.t.courseId,
           courseName: item.t.courseName,
@@ -275,8 +275,33 @@ export default function Planner() {
 
         if (item.overdue) overdueAllocated += chunk;
 
-        di = (di + 1) % days.length;
+        const prev = allocatedByTask.get(item.t.id) ?? 0;
+        allocatedByTask.set(item.t.id, prev + chunk);
+
+        dayCursor = (dayCursor + 1) % days.length;
       }
+    }
+
+    const topN = scored.slice(0, 3);
+    for (const item of topN) {
+      if (budget <= 0) break;
+      if (!canAllocateOverdue(item.overdue)) continue;
+
+      const already = allocatedByTask.get(item.t.id) ?? 0;
+      if (already >= 1) continue;
+
+      allocateHours(item, 1);
+    }
+
+    for (const item of scored) {
+      if (budget <= 0) break;
+      if (!canAllocateOverdue(item.overdue)) continue;
+
+      const already = allocatedByTask.get(item.t.id) ?? 0;
+      const remainingForTask = Math.max(0, item.hoursNeeded - already);
+      if (remainingForTask <= 0) continue;
+
+      allocateHours(item, Math.min(remainingForTask, budget));
     }
 
     for (const d of days) {
@@ -356,7 +381,6 @@ export default function Planner() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Hours */}
           <div className="space-y-1">
             <div className="text-xs opacity-70">Hours per week</div>
             <input
@@ -367,7 +391,7 @@ export default function Planner() {
               value={hoursPerWeek}
               onChange={(e) => setHoursPerWeek(Number(e.target.value))}
             />
-            <div className="text-xs opacity-60">Used to allocate study chunks across enabled days.</div>
+            <div className="text-xs opacity-60">Hours distribute evenly across enabled days (no Monday cramming).</div>
           </div>
 
           <div className="md:col-span-2 space-y-2">
@@ -421,7 +445,7 @@ export default function Planner() {
             </div>
 
             <div className="text-xs opacity-60">
-              Turn off a day to reallocate hours. Overdue tasks stay urgent (but won’t dominate if capped).
+              Planner now rotates the starting day while allocating, so hours spread across the week.
             </div>
           </div>
         </div>
@@ -448,20 +472,14 @@ export default function Planner() {
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs px-2 py-1 rounded-full border bg-muted">
-                          {e.courseName}
-                        </span>
+                        <span className="text-xs px-2 py-1 rounded-full border bg-muted">{e.courseName}</span>
 
                         <span className="font-medium truncate max-w-[60ch]">{e.title}</span>
 
                         {e.dueDate ? (
-                          <span className="text-xs px-2 py-1 rounded-full border opacity-80">
-                            Due {e.dueDate}
-                          </span>
+                          <span className="text-xs px-2 py-1 rounded-full border opacity-80">Due {e.dueDate}</span>
                         ) : (
-                          <span className="text-xs px-2 py-1 rounded-full border opacity-60">
-                            No due date
-                          </span>
+                          <span className="text-xs px-2 py-1 rounded-full border opacity-60">No due date</span>
                         )}
 
                         {e.overdue ? (
@@ -475,15 +493,11 @@ export default function Planner() {
                         </span>
                       </div>
 
-                      <div className="text-xs opacity-60 mt-1">
-                        Score {e.score.toFixed(2)}
-                      </div>
+                      <div className="text-xs opacity-60 mt-1">Score {e.score.toFixed(2)}</div>
                     </div>
 
                     <div className="flex items-center gap-2 justify-between sm:justify-end">
-                      <span className="text-sm px-2.5 py-1 rounded-full border">
-                        {e.hours}h
-                      </span>
+                      <span className="text-sm px-2.5 py-1 rounded-full border">{e.hours}h</span>
 
                       <div className="flex gap-2">
                         <button
