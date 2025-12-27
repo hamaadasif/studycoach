@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useAuth } from "../lib/AuthContext";
+import { db } from "../lib/firebase";
 import {
   addDoc,
   collection,
@@ -11,351 +13,253 @@ import {
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { useAuth } from "../lib/AuthContext";
 
 type TaskStatus = "not_started" | "in_progress" | "done";
 
-type TaskRow = {
+type Task = {
   id: string;
   title: string;
-  dueDate: string; 
+  dueDate: string;
+  status: TaskStatus;
   weight: number;
   difficulty: number;
-  status: TaskStatus;
+  createdAt?: any;
 };
 
+function dateKey(ymd: string) {
+  if (!ymd) return Number.POSITIVE_INFINITY;
+  const n = Number(ymd.replaceAll("-", ""));
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
+
+function createdAtMs(v: any) {
+  if (!v) return Number.POSITIVE_INFINITY;
+  if (typeof v?.toMillis === "function") return v.toMillis();
+  return Number.POSITIVE_INFINITY;
+}
+
 export default function CourseDetails() {
+  const { courseId } = useParams<{ courseId: string }>();
   const { user, loading } = useAuth();
-  const { courseId } = useParams();
 
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [creating, setCreating] = useState(false);
 
-  const [title, setTitle] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [weight, setWeight] = useState(10);
-  const [difficulty, setDifficulty] = useState(3);
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [edit, setEdit] = useState<Omit<TaskRow, "id"> | null>(null);
-
-  const tasksCol = useMemo(() => {
-    if (!user || !courseId) return null;
-    return collection(db, "users", user.uid, "courses", courseId, "tasks");
-  }, [user, courseId]);
+  const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
+  const titleRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
-    if (!tasksCol) return;
+    if (!user || !courseId) return;
 
-    const q = query(tasksCol, orderBy("dueDate", "asc"));
+    const tasksRef = collection(db, "users", user.uid, "courses", courseId, "tasks");
+    const q = query(tasksRef, orderBy("createdAt", "asc"));
+
     const unsub = onSnapshot(q, (snap) => {
-      const rows: TaskRow[] = snap.docs.map((d) => {
-        const data = d.data() as Partial<TaskRow>;
+      const list: Task[] = snap.docs.map((d) => {
+        const data = d.data() as any;
         return {
           id: d.id,
-          title: typeof data.title === "string" ? data.title : "Untitled",
-          dueDate: typeof data.dueDate === "string" ? data.dueDate : "",
+          title: data.title ?? "",
+          dueDate: data.dueDate ?? "",
+          status: (data.status as TaskStatus) ?? "not_started",
           weight: typeof data.weight === "number" ? data.weight : 0,
           difficulty: typeof data.difficulty === "number" ? data.difficulty : 3,
-          status:
-            data.status === "done" || data.status === "in_progress" || data.status === "not_started"
-              ? data.status
-              : "not_started",
+          createdAt: data.createdAt,
         };
       });
-      setTasks(rows);
+      setTasks(list);
     });
 
     return () => unsub();
-  }, [tasksCol]);
+  }, [user, courseId]);
 
-  async function createTask() {
-    if (!user || !courseId || !tasksCol) return;
-    const t = title.trim();
-    if (!t) return;
+  const sortedTasks = useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      if (a.status === "done" && b.status !== "done") return 1;
+      if (a.status !== "done" && b.status === "done") return -1;
 
-    setBusyId("create");
+      const ad = dateKey(a.dueDate);
+      const bd = dateKey(b.dueDate);
+      if (ad !== bd) return ad - bd;
+
+      return createdAtMs(a.createdAt) - createdAtMs(b.createdAt);
+    });
+  }, [tasks]);
+
+  useEffect(() => {
+    if (!focusTaskId) return;
+    const el = titleRefs.current[focusTaskId];
+    if (el) {
+      el.focus();
+      el.select();
+      setFocusTaskId(null);
+    }
+  }, [sortedTasks, focusTaskId]);
+
+  async function addBlankTask() {
+    if (!user || !courseId) return;
+    setCreating(true);
+
     try {
-      await addDoc(tasksCol, {
-        title: t,
-        dueDate,
-        weight,
-        difficulty,
-        status: "not_started" as TaskStatus,
+      const ref = await addDoc(collection(db, "users", user.uid, "courses", courseId, "tasks"), {
+        title: "",
+        dueDate: "",
+        status: "not_started",
+        weight: 0,
+        difficulty: 3,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
-      setTitle("");
-      setDueDate("");
-      setWeight(10);
-      setDifficulty(3);
+
+      setFocusTaskId(ref.id);
     } finally {
-      setBusyId(null);
+      setCreating(false);
     }
   }
 
-  async function saveTask(taskId: string) {
-    if (!user || !courseId || !edit) return;
+  async function updateTask(taskId: string, patch: Partial<Task>) {
+    if (!user || !courseId) return;
 
-    setBusyId(taskId);
-    try {
-      await updateDoc(doc(db, "users", user.uid, "courses", courseId, "tasks", taskId), {
-        ...edit,
-        updatedAt: serverTimestamp(),
-      });
-      setEditingId(null);
-      setEdit(null);
-    } finally {
-      setBusyId(null);
-    }
+    await updateDoc(doc(db, "users", user.uid, "courses", courseId, "tasks", taskId), {
+      ...patch,
+      updatedAt: serverTimestamp(),
+    });
   }
 
   async function removeTask(taskId: string) {
     if (!user || !courseId) return;
-
-    setBusyId(taskId);
-    try {
-      await deleteDoc(doc(db, "users", user.uid, "courses", courseId, "tasks", taskId));
-    } finally {
-      setBusyId(null);
-    }
+    await deleteDoc(doc(db, "users", user.uid, "courses", courseId, "tasks", taskId));
   }
 
-  async function setStatus(taskId: string, status: TaskStatus) {
-    if (!user || !courseId) return;
-
-    setBusyId(taskId);
-    try {
-      await updateDoc(doc(db, "users", user.uid, "courses", courseId, "tasks", taskId), {
-        status,
-        updatedAt: serverTimestamp(),
-      });
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  if (loading) return <div className="p-6">Loading...</div>;
+  if (loading) return <div className="p-6">Loading…</div>;
   if (!user) return <div className="p-6">Please sign in.</div>;
-  if (!courseId) return <div className="p-6">Missing course id.</div>;
+  if (!courseId) return <div className="p-6">Missing course.</div>;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Course Tasks</h1>
-        <p className="text-sm opacity-70">Add assessments and track progress.</p>
-      </div>
-
-      {/* Create */}
-      <div className="rounded-md border p-4 space-y-3">
-        <div className="font-medium">Add Task</div>
-
-        <input
-          className="w-full px-3 py-2 rounded-md border bg-background"
-          placeholder="e.g., Midterm 1, Assignment 2, Quiz"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="space-y-1">
-            <div className="text-xs opacity-70">Due date</div>
-            <input
-              type="date"
-              className="w-full px-3 py-2 rounded-md border bg-background"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <div className="text-xs opacity-70">Weight (%)</div>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              className="w-full px-3 py-2 rounded-md border bg-background"
-              value={weight}
-              onChange={(e) => setWeight(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <div className="text-xs opacity-70">Difficulty (1–5)</div>
-            <input
-              type="number"
-              min={1}
-              max={5}
-              className="w-full px-3 py-2 rounded-md border bg-background"
-              value={difficulty}
-              onChange={(e) => setDifficulty(Number(e.target.value))}
-            />
-          </div>
-
-          <div className="flex items-end">
-            <button
-              className="w-full px-3 py-2 rounded-md border hover:bg-muted text-sm"
-              onClick={createTask}
-              disabled={busyId === "create" || !title.trim()}
-            >
-              {busyId === "create" ? "Adding..." : "Add Task"}
-            </button>
-          </div>
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
+          <p className="text-sm opacity-70">
+            Completed tasks automatically move to the bottom.
+          </p>
         </div>
+
+        <button
+          className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
+          onClick={addBlankTask}
+          disabled={creating}
+        >
+          {creating ? "Adding..." : "+ New"}
+        </button>
       </div>
 
-      {/* List */}
-      <div className="space-y-2">
-        {tasks.length === 0 ? (
-          <div className="text-sm opacity-70">No tasks yet.</div>
-        ) : (
-          tasks.map((t) => {
-            const isBusy = busyId === t.id;
-            const isEditing = editingId === t.id;
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Title</th>
+              <th className="px-3 py-2 text-left font-medium">Due</th>
+              <th className="px-3 py-2 text-left font-medium">Status</th>
+              <th className="px-3 py-2 text-left font-medium">Weight %</th>
+              <th className="px-3 py-2 text-left font-medium">Difficulty</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
 
-            return (
-              <div key={t.id} className="rounded-md border p-3 space-y-3">
-                {!isEditing ? (
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{t.title}</div>
-                      <div className="text-sm opacity-70">
-                        Due: {t.dueDate || "—"} • Weight: {t.weight}% • Difficulty: {t.difficulty}/5
-                      </div>
-                      <div className="mt-2 flex gap-2 flex-wrap">
-                        <button
-                          className="px-3 py-1.5 rounded-md border hover:bg-muted text-xs"
-                          onClick={() => setStatus(t.id, "not_started")}
-                          disabled={isBusy}
-                        >
-                          Not started
-                        </button>
-                        <button
-                          className="px-3 py-1.5 rounded-md border hover:bg-muted text-xs"
-                          onClick={() => setStatus(t.id, "in_progress")}
-                          disabled={isBusy}
-                        >
-                          In progress
-                        </button>
-                        <button
-                          className="px-3 py-1.5 rounded-md border hover:bg-muted text-xs"
-                          onClick={() => setStatus(t.id, "done")}
-                          disabled={isBusy}
-                        >
-                          Done
-                        </button>
-                      </div>
-                    </div>
+          <tbody>
+            {sortedTasks.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-3 py-10 text-center opacity-60">
+                  No tasks yet — click <span className="font-medium">+ New</span>
+                </td>
+              </tr>
+            ) : (
+              sortedTasks.map((t) => (
+                <tr key={t.id} className="border-t">
+                  <td className="px-3 py-2">
+                    <input
+                      ref={(el) => (titleRefs.current[t.id] = el)}
+                      className="w-full bg-transparent outline-none"
+                      placeholder="Untitled"
+                      value={t.title}
+                      onChange={(e) => updateTask(t.id, { title: e.target.value })}
+                    />
+                  </td>
 
-                    <div className="flex gap-2">
-                      <button
-                        className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
-                        onClick={() => {
-                          setEditingId(t.id);
-                          setEdit({
-                            title: t.title,
-                            dueDate: t.dueDate,
-                            weight: t.weight,
-                            difficulty: t.difficulty,
-                            status: t.status,
-                          });
-                        }}
-                        disabled={isBusy}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
-                        onClick={() => removeTask(t.id)}
-                        disabled={isBusy}
-                      >
-                        {isBusy ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <input
-                        className="md:col-span-2 w-full px-3 py-2 rounded-md border bg-background"
-                        value={edit?.title ?? ""}
-                        onChange={(e) => setEdit((prev) => (prev ? { ...prev, title: e.target.value } : prev))}
-                        disabled={isBusy}
-                      />
-                      <input
-                        type="date"
-                        className="w-full px-3 py-2 rounded-md border bg-background"
-                        value={edit?.dueDate ?? ""}
-                        onChange={(e) => setEdit((prev) => (prev ? { ...prev, dueDate: e.target.value } : prev))}
-                        disabled={isBusy}
-                      />
-                      <select
-                        className="w-full px-3 py-2 rounded-md border bg-background"
-                        value={edit?.status ?? "not_started"}
-                        onChange={(e) =>
-                          setEdit((prev) =>
-                            prev ? { ...prev, status: e.target.value as TaskStatus } : prev
-                          )
-                        }
-                        disabled={isBusy}
-                      >
-                        <option value="not_started">Not started</option>
-                        <option value="in_progress">In progress</option>
-                        <option value="done">Done</option>
-                      </select>
-                    </div>
+                  <td className="px-3 py-2">
+                    <input
+                      type="date"
+                      className="bg-transparent"
+                      value={t.dueDate}
+                      onChange={(e) => updateTask(t.id, { dueDate: e.target.value })}
+                    />
+                  </td>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        className="w-full px-3 py-2 rounded-md border bg-background"
-                        value={edit?.weight ?? 0}
-                        onChange={(e) =>
-                          setEdit((prev) => (prev ? { ...prev, weight: Number(e.target.value) } : prev))
-                        }
-                        disabled={isBusy}
-                      />
-                      <input
-                        type="number"
-                        min={1}
-                        max={5}
-                        className="w-full px-3 py-2 rounded-md border bg-background"
-                        value={edit?.difficulty ?? 3}
-                        onChange={(e) =>
-                          setEdit((prev) => (prev ? { ...prev, difficulty: Number(e.target.value) } : prev))
-                        }
-                        disabled={isBusy}
-                      />
+                  <td className="px-3 py-2">
+                    <select
+                      className="bg-transparent"
+                      value={t.status}
+                      onChange={(e) =>
+                        updateTask(t.id, { status: e.target.value as TaskStatus })
+                      }
+                    >
+                      <option value="not_started">Not started</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="done">Done</option>
+                    </select>
+                  </td>
 
-                      <div className="md:col-span-2 flex gap-2">
-                        <button
-                          className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
-                          onClick={() => saveTask(t.id)}
-                          disabled={isBusy || !(edit?.title ?? "").trim()}
-                        >
-                          {isBusy ? "Saving..." : "Save"}
-                        </button>
-                        <button
-                          className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
-                          onClick={() => {
-                            setEditingId(null);
-                            setEdit(null);
-                          }}
-                          disabled={isBusy}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      className="w-20 bg-transparent"
+                      value={t.weight}
+                      onChange={(e) =>
+                        updateTask(t.id, { weight: Number(e.target.value) })
+                      }
+                    />
+                  </td>
+
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={5}
+                      className="w-16 bg-transparent"
+                      value={t.difficulty}
+                      onChange={(e) =>
+                        updateTask(t.id, { difficulty: Number(e.target.value) })
+                      }
+                    />
+                  </td>
+
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      className="text-sm opacity-60 hover:opacity-100"
+                      onClick={() => removeTask(t.id)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+
+            <tr className="border-t">
+              <td colSpan={6} className="px-3 py-3">
+                <button
+                  className="text-sm opacity-70 hover:opacity-100"
+                  onClick={addBlankTask}
+                  disabled={creating}
+                >
+                  + New
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );
