@@ -25,7 +25,18 @@ type Task = {
   status: TaskStatus;
   weight: number;
   difficulty: number;
+  notes?: string;
   createdAt?: any;
+};
+
+type SuggestedTask = {
+  id: string;
+  selected: boolean;
+  title: string;
+  dueDate: string;
+  weight: number;
+  difficulty: number;
+  notes: string;
 };
 
 function dateKey(ymd: string) {
@@ -68,6 +79,11 @@ export default function CourseDetails() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [busyUploadId, setBusyUploadId] = useState<string | null>(null);
 
+  const [extractingId, setExtractingId] = useState<string | null>(null);
+  const [suggested, setSuggested] = useState<SuggestedTask[] | null>(null);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
   useEffect(() => {
     if (!user || !courseId) return;
 
@@ -84,6 +100,7 @@ export default function CourseDetails() {
           status: (data.status as TaskStatus) ?? "not_started",
           weight: typeof data.weight === "number" ? data.weight : 0,
           difficulty: typeof data.difficulty === "number" ? data.difficulty : 3,
+          notes: typeof data.notes === "string" ? data.notes : "",
           createdAt: data.createdAt,
         };
       });
@@ -152,6 +169,7 @@ export default function CourseDetails() {
         status: "not_started",
         weight: 0,
         difficulty: 3,
+        notes: "",
         createdAt: serverTimestamp(),
       });
 
@@ -218,6 +236,74 @@ export default function CourseDetails() {
       setUploadError(e?.message || "Delete failed.");
     } finally {
       setBusyUploadId(null);
+    }
+  }
+
+  async function extractFromUpload(u: UploadRecord) {
+    if (!user || !courseId) return;
+
+    setSuggestError(null);
+    setSuggested(null);
+    setExtractingId(u.id);
+
+    try {
+      const res = await fetch("/api/extract-from-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: u.url,
+          contentType: u.contentType,
+          courseName: "",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Extraction failed.");
+
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const mapped: SuggestedTask[] = items.map((t: any, idx: number) => ({
+        id: `${Date.now()}-${idx}`,
+        selected: true,
+        title: String(t.title || "").trim(),
+        dueDate: String(t.dueDate || "").trim(),
+        weight: Number(t.weight) || 0,
+        difficulty: Number(t.difficulty) || 3,
+        notes: String(t.notes || "").trim(),
+      }));
+
+      setSuggested(mapped.length ? mapped : []);
+    } catch (e: any) {
+      setSuggestError(e?.message || "Could not extract tasks.");
+    } finally {
+      setExtractingId(null);
+    }
+  }
+
+  async function importSuggested() {
+    if (!user || !courseId || !suggested) return;
+
+    const chosen = suggested.filter((s) => s.selected && s.title.trim().length > 0);
+    if (chosen.length === 0) return;
+
+    setImporting(true);
+    try {
+      const tasksCol = collection(db, "users", user.uid, "courses", courseId, "tasks");
+
+      for (const s of chosen) {
+        await addDoc(tasksCol, {
+          title: s.title.trim(),
+          dueDate: s.dueDate || "",
+          status: "not_started",
+          weight: Math.max(0, Math.min(100, Number(s.weight) || 0)),
+          difficulty: Math.max(1, Math.min(5, Number(s.difficulty) || 3)),
+          notes: s.notes || "",
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      setSuggested(null);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -342,7 +428,7 @@ export default function CourseDetails() {
         <div className="flex items-end justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-lg font-semibold tracking-tight">Syllabus uploads</h2>
-            <p className="text-sm opacity-70">Upload a PDF/DOCX/TXT. We’ll store it under this course.</p>
+            <p className="text-sm opacity-70">Upload a PDF/TXT, then click “Extract tasks”.</p>
           </div>
 
           <div className="flex gap-2">
@@ -375,7 +461,6 @@ export default function CourseDetails() {
             <div className="h-2 rounded-full border overflow-hidden">
               <div className="h-full bg-foreground/30" style={{ width: `${uploadPct}%` }} />
             </div>
-            <div className="text-xs opacity-60">Max 10MB. Allowed: PDF, DOC, DOCX, TXT.</div>
           </div>
         ) : null}
 
@@ -395,15 +480,20 @@ export default function CourseDetails() {
                   </div>
                 </div>
 
-                <div className="flex gap-2 justify-end">
-                  <a
-                    className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
-                    href={u.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                <div className="flex gap-2 justify-end flex-wrap">
+                  <a className="px-3 py-2 rounded-md border hover:bg-muted text-sm" href={u.url} target="_blank" rel="noreferrer">
                     Open
                   </a>
+
+                  <button
+                    className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
+                    onClick={() => extractFromUpload(u)}
+                    disabled={extractingId === u.id}
+                    title="Extract tasks from this syllabus"
+                  >
+                    {extractingId === u.id ? "Extracting..." : "Extract tasks"}
+                  </button>
+
                   <button
                     className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
                     onClick={() => removeUpload(u)}
@@ -418,9 +508,144 @@ export default function CourseDetails() {
           </div>
         )}
 
-        <div className="text-xs opacity-60">
-          Next: add “Extract tasks from syllabus” (we’ll parse text + let you confirm before creating tasks).
-        </div>
+        {suggestError ? (
+          <div className="text-sm rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-700 px-3 py-2">
+            {suggestError}
+          </div>
+        ) : null}
+
+        {suggested !== null ? (
+          <div className="rounded-lg border p-3 space-y-3">
+            <div className="flex items-end justify-between gap-3 flex-wrap">
+              <div>
+                <div className="font-medium">Review extracted tasks</div>
+                <div className="text-xs opacity-60">Uncheck anything that shouldn’t be imported.</div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
+                  onClick={() => setSuggested(null)}
+                  disabled={importing}
+                >
+                  Close
+                </button>
+                <button
+                  className="px-3 py-2 rounded-md border hover:bg-muted text-sm"
+                  onClick={importSuggested}
+                  disabled={importing || suggested.filter((s) => s.selected && s.title.trim()).length === 0}
+                >
+                  {importing ? "Importing..." : "Import selected"}
+                </button>
+              </div>
+            </div>
+
+            {suggested.length === 0 ? (
+              <div className="text-sm opacity-70">No graded items found.</div>
+            ) : (
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="px-2 py-2 text-left">Use</th>
+                      <th className="px-2 py-2 text-left">Title</th>
+                      <th className="px-2 py-2 text-left">Due</th>
+                      <th className="px-2 py-2 text-left">Weight</th>
+                      <th className="px-2 py-2 text-left">Diff</th>
+                      <th className="px-2 py-2 text-left">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suggested.map((s) => (
+                      <tr key={s.id} className="border-t">
+                        <td className="px-2 py-2">
+                          <input
+                            type="checkbox"
+                            checked={s.selected}
+                            onChange={(e) =>
+                              setSuggested((prev) =>
+                                prev ? prev.map((x) => (x.id === s.id ? { ...x, selected: e.target.checked } : x)) : prev
+                              )
+                            }
+                          />
+                        </td>
+
+                        <td className="px-2 py-2">
+                          <input
+                            className="w-full bg-transparent outline-none"
+                            value={s.title}
+                            onChange={(e) =>
+                              setSuggested((prev) =>
+                                prev ? prev.map((x) => (x.id === s.id ? { ...x, title: e.target.value } : x)) : prev
+                              )
+                            }
+                          />
+                        </td>
+
+                        <td className="px-2 py-2">
+                          <input
+                            type="date"
+                            className="bg-transparent"
+                            value={s.dueDate}
+                            onChange={(e) =>
+                              setSuggested((prev) =>
+                                prev ? prev.map((x) => (x.id === s.id ? { ...x, dueDate: e.target.value } : x)) : prev
+                              )
+                            }
+                          />
+                        </td>
+
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            className="w-20 bg-transparent"
+                            value={s.weight}
+                            onChange={(e) =>
+                              setSuggested((prev) =>
+                                prev ? prev.map((x) => (x.id === s.id ? { ...x, weight: Number(e.target.value) } : x)) : prev
+                              )
+                            }
+                          />
+                        </td>
+
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            min={1}
+                            max={5}
+                            className="w-16 bg-transparent"
+                            value={s.difficulty}
+                            onChange={(e) =>
+                              setSuggested((prev) =>
+                                prev
+                                  ? prev.map((x) => (x.id === s.id ? { ...x, difficulty: Number(e.target.value) } : x))
+                                  : prev
+                              )
+                            }
+                          />
+                        </td>
+
+                        <td className="px-2 py-2">
+                          <input
+                            className="w-[28rem] max-w-[60vw] bg-transparent outline-none"
+                            value={s.notes}
+                            onChange={(e) =>
+                              setSuggested((prev) =>
+                                prev ? prev.map((x) => (x.id === s.id ? { ...x, notes: e.target.value } : x)) : prev
+                              )
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );

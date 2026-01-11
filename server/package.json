@@ -1,0 +1,16 @@
+{
+  "name": "studycoach-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@bingsjs/pdf-parse": "^1.1.1",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.0.0",
+    "pdf-parse": "^2.4.5"
+  }
+}
