@@ -1,73 +1,59 @@
-# React + TypeScript + Vite
+# StudyCoach
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+StudyCoach is a full-stack web app that helps students turn raw course syllabi into a structured study plan.  
+Users can upload their syllabus, automatically extract assignments using AI, and get a prioritized weekly planner based on deadlines, weights, and difficulty.
 
-Currently, two official plugins are available:
+**Live Demo:** https://studycoach-five.vercel.app/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+This project focuses on real-world academic workflows rather than idealized data.
 
-## React Compiler
+---
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the ESLint configuration
+- **Authentication**
+  - Google Sign-In via Firebase Auth
+  - Per-user data isolation
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Courses & Tasks**
+  - Create courses
+  - Add, edit, and delete assignments
+  - Task status tracking (Not started / In progress / Done)
+  - Notion-style table interface
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **AI Syllabus Extraction**
+  - Upload syllabus PDFs
+  - Server-side PDF parsing
+  - AI-assisted extraction of assignments, weights, and dates
+  - Review and confirm tasks before importing
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- **Planner**
+  - Weekly study hour budgeting
+  - Prioritization based on due dates, assignment weight, and difficulty
+  - Automatically excludes completed tasks
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- **Cloud Architecture**
+  - Firebase Firestore for data storage
+  - Firebase Storage for file uploads
+  - Express backend for AI processing
+  - Frontend deployed on Vercel
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Tech Stack
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### Frontend
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+
+### Backend
+- Node.js (Express)
+- OpenAI API
+- PDF parsing (`@bingsjs/pdf-parse`)
+
+### Infrastructure
+- Firebase Authentication
+- Firestore
+- Firebase Storage
