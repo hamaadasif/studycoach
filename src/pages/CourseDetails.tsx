@@ -646,6 +646,18 @@ export default function CourseDetails() {
             )}
           </div>
         ) : null}
+        <div className="mt-6 text-sm opacity-70">
+          Found a bug or something looks off?{" "}
+          <a
+            href="https://www.hamaadasif.com"
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:opacity-100"
+          >
+            Contact me
+          </a>
+        </div>
+
       </div>
     </div>
   );
