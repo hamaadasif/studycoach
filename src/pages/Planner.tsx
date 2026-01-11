@@ -117,6 +117,12 @@ function statusPillClass(s: TaskStatus) {
 export default function Planner() {
   const { user, loading } = useAuth();
 
+  if (loading) return <div className="p-6">Loading...</div>;
+  if (!user) return <div className="p-6">Please sign in.</div>;
+
+  const uid = user.uid;
+
+
   const [hoursPerWeek, setHoursPerWeek] = useState(10);
   const [studyDays, setStudyDays] = useState<number[]>([...ALL_DAYS]);
   const [capOverdue, setCapOverdue] = useState(true);
@@ -157,7 +163,7 @@ export default function Planner() {
     let cancelled = false;
 
     async function loadAll() {
-      const coursesSnap = await getDocs(collection(db, "users", user.uid, "courses"));
+      const coursesSnap = await getDocs(collection(db, "users", uid, "courses"));
       const courseList = coursesSnap.docs.map((d) => ({
         id: d.id,
         name: (d.data() as any)?.name ?? "Untitled",
@@ -166,7 +172,7 @@ export default function Planner() {
       const all: Task[] = [];
 
       for (const c of courseList) {
-        const tasksSnap = await getDocs(collection(db, "users", user.uid, "courses", c.id, "tasks"));
+        const tasksSnap = await getDocs(collection(db, "users", uid, "courses", c.id, "tasks"));
         for (const td of tasksSnap.docs) {
           const data = td.data() as any;
 

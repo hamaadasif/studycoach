@@ -5,7 +5,6 @@ import {
   deleteDoc,
   doc,
   serverTimestamp,
-  setDoc,
 } from "firebase/firestore";
 import { storage, db } from "./firebase";
 
@@ -57,7 +56,6 @@ export async function uploadSyllabusForCourse(args: {
   const { uid, courseId, file, onProgress } = args;
 
   const cleanName = safeFileName(file.name);
-  const ext = cleanName.split(".").pop() || "file";
   const stamp = Date.now();
 
   const storagePath = `users/${uid}/courses/${courseId}/syllabus/${stamp}-${cleanName}`;

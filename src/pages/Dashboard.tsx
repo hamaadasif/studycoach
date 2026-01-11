@@ -103,6 +103,11 @@ function statusLabel(s: TaskStatus) {
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
+  if (loading) return <div className="p-6">Loading...</div>;
+  if (!user) return <div className="p-6">Please sign in.</div>;
+
+  const uid = user.uid;
+
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [courseCount, setCourseCount] = useState(0);
@@ -135,7 +140,7 @@ export default function Dashboard() {
     let cancelled = false;
 
     async function loadAll() {
-      const coursesSnap = await getDocs(collection(db, "users", user.uid, "courses"));
+      const coursesSnap = await getDocs(collection(db, "users", uid, "courses"));
       if (!cancelled) setCourseCount(coursesSnap.size);
 
       const courseList = coursesSnap.docs.map((d) => ({
@@ -146,7 +151,7 @@ export default function Dashboard() {
       const all: Task[] = [];
 
       for (const c of courseList) {
-        const tasksSnap = await getDocs(collection(db, "users", user.uid, "courses", c.id, "tasks"));
+        const tasksSnap = await getDocs(collection(db, "users", uid, "courses", c.id, "tasks"));
         for (const td of tasksSnap.docs) {
           const data = td.data() as any;
 

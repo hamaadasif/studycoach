@@ -353,7 +353,9 @@ export default function CourseDetails() {
                 <tr key={t.id} className="border-t">
                   <td className="px-3 py-2">
                     <input
-                      ref={(el) => (titleRefs.current[t.id] = el)}
+                      ref={(el) => {
+                        titleRefs.current[t.id] = el;
+                      }}
                       className="w-full bg-transparent outline-none"
                       placeholder="Untitled"
                       value={t.title}
