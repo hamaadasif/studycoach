@@ -247,7 +247,8 @@ export default function CourseDetails() {
     setExtractingId(u.id);
 
     try {
-      const res = await fetch("/api/extract-from-url", {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://studycoach-9jdb.onrender.com";
+      const res = await fetch(`${API_BASE}/extract-from-url`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
